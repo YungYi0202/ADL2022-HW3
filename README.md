@@ -1,12 +1,14 @@
 # ADL21-HW3
 Evaluation script for ADL 2021 homework 3
 
+
 ## Installation
 ```
 git clone https://github.com/ntu-adl-ta/ADL21-HW3.git
 cd ADL21-HW3
 pip install -e tw_rouge
 ```
+
 
 ## Usage
 ### Use the Script
@@ -52,3 +54,7 @@ python eval.py -r public.jsonl submission.jsonl
 >>> get_rouge(['我是人'], ['我是一個人'], avg=False)
 [{'rouge-1': {'f': 0.7499999953125, 'p': 1.0, 'r': 0.6}, 'rouge-2': {'f': 0.33333332888888895, 'p': 0.5, 'r': 0.25}, 'rouge-l': {'f': 0.7499999953125, 'p': 1.0, 'r': 0.6}}]
 ```
+
+
+## Reference
+[cccntu/tw_rouge](https://github.com/cccntu/tw_rouge)
