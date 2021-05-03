@@ -1,6 +1,8 @@
 # ADL21-HW3
-Evaluation script for ADL 2021 homework 3
+Dataset & evaluation script for ADL 2021 homework 3
 
+## Dataset
+[download link](https://drive.google.com/file/d/186ejZVADY16RBfVjzcMcz9bal9L3inXC/view?usp=sharing)
 
 ## Installation
 ```
