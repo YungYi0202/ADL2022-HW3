@@ -23,7 +23,7 @@ optional arguments:
 
 Example:
 ```
-python eval.py -r public.jsonl submission.jsonl
+python eval.py -r public.jsonl -s submission.jsonl
 {
   "rouge-1": {
     "f": 0.21999419163162043,
