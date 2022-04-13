@@ -1,13 +1,13 @@
-# ADL21-HW3
-Dataset & evaluation script for ADL 2021 homework 3
+# ADL22-HW3
+Dataset & evaluation script for ADL 2022 homework 3
 
 ## Dataset
 [download link](https://drive.google.com/file/d/186ejZVADY16RBfVjzcMcz9bal9L3inXC/view?usp=sharing)
 
 ## Installation
 ```
-git clone https://github.com/ntu-adl-ta/ADL21-HW3.git
-cd ADL21-HW3
+git clone https://github.com/ntu-adl-ta/ADL22-HW3.git
+cd ADL22-HW3
 pip install -e tw_rouge
 ```
 
