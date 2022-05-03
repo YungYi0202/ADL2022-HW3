@@ -3,12 +3,16 @@ import json
 # Global varirables 
 TRAIN = "train"
 DEV = "dev"
-SPLITS = [TRAIN, DEV]
+TEST = "test"
 
 TITLE = "title"
 MAINTEXT = "maintext"
 ID = "id"
-KEYS = [TITLE, MAINTEXT, ID]
+KEYS = {
+    TRAIN: [TITLE, MAINTEXT],
+    DEV: [TITLE, MAINTEXT],
+    TEST: [MAINTEXT, ID],
+}
 
 def read_data(filename, keys):
     data = []

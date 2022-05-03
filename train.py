@@ -19,6 +19,19 @@ import csv
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
+
+def get_splits_n_filenames(args):
+    splits = []
+    filenames = dict()
+    if not args.no_train:
+        splits.extend([TRAIN, DEV])
+        filenames[TRAIN] = args.train_file_path
+        filenames[DEV] = args.dev_file_path
+    if not args.no_test:
+        splits.append(TEST)
+        filenames[TEST] = args.test_file_path
+    return splits, filenames
+
 def train_epoch(epoch, args, model, train_loader, optimizer, scheduler, device):
     model.train()
     
@@ -52,11 +65,9 @@ def train_epoch(epoch, args, model, train_loader, optimizer, scheduler, device):
     
     return train_losses
 
-def dev_epoch(epoch, args, model, dev_loader, tokenizer, device):
+def dev_epoch(args, model, dev_loader, tokenizer, device):
     model.eval()
-    dev_loss = 0.0
-    titles = []
-    preds = []
+    titles, preds, ids = [], [], []
     with torch.no_grad():
         for batch in tqdm(dev_loader):
             generate_ids = model.generate(
@@ -70,8 +81,22 @@ def dev_epoch(epoch, args, model, dev_loader, tokenizer, device):
             decoded_result = tokenizer.batch_decode( generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
             pred = list(map(lambda x:x.strip(),decoded_result))
             preds.extend(pred)
-            titles.extend(batch["title"])
-    return titles, preds 
+            if TITLE in batch:
+                titles.extend(batch[TITLE])
+            if ID in batch:
+                ids.extend(batch[ID])
+
+    for i in range(len(preds)):
+        if preds[i] == "":
+            log = "Detect empty prediction."
+            if len(titles) > 0:
+                log += f" Title: {titles[i]}"
+            elif len(ids) > 0:
+                log += f" ID: {ids[i]}"
+            print(log)
+            preds[i] = "*"
+            
+    return titles, preds, ids
 
 def save_models(args, model, optimizer, scheduler):
     # Save a model and its configuration file to the directory 「saved_model」 
@@ -85,58 +110,71 @@ def save_models(args, model, optimizer, scheduler):
 def main(args):
     set_seed(args.seed)
     # Data
-    filenames = {TRAIN: args.train_file_path, DEV: args.dev_file_path}
-    raw_data = {split: read_data(filenames[split], KEYS) for split in SPLITS}
+    SPLITS, filenames = get_splits_n_filenames(args)
+    raw_data = {split: read_data(filenames[split], KEYS[split]) for split in SPLITS}
     
     # Tokenizer
     tokenizer = T5Tokenizer.from_pretrained(args.model_path)
     
-    # Dataset and Loader
+    # Dataset
     dataset = {
         split: NewsSummaryDataset(raw_data[split], tokenizer, args.title_max_len, args.maintext_max_len) 
         for split in SPLITS
         }
-    train_loader = DataLoader(dataset[TRAIN], batch_size=args.batch_size, shuffle=True, pin_memory=True)
-    dev_loader = DataLoader(dataset[DEV], batch_size=args.batch_size, shuffle=False, pin_memory=True)
 
-    # Model
-    model = MT5ForConditionalGeneration.from_pretrained(args.model_path).to(device=args.device)
-    # Optimizer
-    optimizer = AdamW(model.parameters(), lr=args.lr, correct_bias=False)
-    # Scheduler
-    # scheduler
-    total_steps = len(train_loader) * args.num_epoch
-    warmup_steps = int(total_steps * args.warmup_ratio)
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps= warmup_steps, num_training_steps=total_steps) 
+    if not args.no_train:
+        train_loader = DataLoader(dataset[TRAIN], batch_size=args.batch_size, shuffle=True, pin_memory=True)
+        dev_loader = DataLoader(dataset[DEV], batch_size=args.batch_size, shuffle=False, pin_memory=True)
 
-    train_losses = []
-    dev_f = []
-    best_f = 0.0
-    for epoch in range(args.num_epoch):
-        # TRAIN
-        new_train_losses = train_epoch(epoch, args, model, train_loader, optimizer, scheduler, args.device)
-        train_losses.extend(new_train_losses)
-        # DEV
-        titles, preds = dev_epoch(epoch, args, model, dev_loader, tokenizer, args.device)
-        eval_res = get_rouge(preds, titles)
-        
-        print(eval_res)
-        with open(args.log_dir / f"valid_{epoch}.json", "w") as fp:
-            json.dump(eval_res, fp, indent = 4)
-        
-        dev_f.append(eval_res["rouge-l"]["f"])
-        
-        if eval_res["rouge-l"]["f"] >= best_f: 
-            best_f = eval_res["rouge-l"]["f"]
-            save_models(args, model, optimizer, scheduler)
+        if args.resume_train:
+            args.model_path = args.ckpt_dir / "model"
+        # Model
+        model = MT5ForConditionalGeneration.from_pretrained(args.model_path).to(device=args.device)
 
-    if args.make_csv:
-        with open(args.log_dir / "loss_f.csv","a+") as fp:
-            writer = csv.writer(fp)
-            writer.writerow(train_losses)
-            writer.writerow(dev_f)
+        # Optimizer
+        optimizer = AdamW(model.parameters(), lr=args.lr, correct_bias=False)
+        # Scheduler
+        # scheduler
+        total_steps = len(train_loader) * args.num_epoch
+        warmup_steps = int(total_steps * args.warmup_ratio)
+        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps= warmup_steps, num_training_steps=total_steps) 
 
+        train_losses, dev_f = [], []
+        best_f = 0.0
+        for epoch in range(args.num_epoch):
+            # TRAIN
+            new_train_losses = train_epoch(epoch, args, model, train_loader, optimizer, scheduler, args.device)
+            train_losses.extend(new_train_losses)
+            # DEV
+            titles, preds, _ = dev_epoch(args, model, dev_loader, tokenizer, args.device)
+            eval_res = get_rouge(preds, titles)
+            
+            print(eval_res)
+            with open(args.log_dir / f"valid_{epoch}.json", "w") as fp:
+                json.dump(eval_res, fp, indent = 4)
+            
+            dev_f.append(eval_res["rouge-l"]["f"])
+            
+            if eval_res["rouge-l"]["f"] >= best_f: 
+                best_f = eval_res["rouge-l"]["f"]
+                save_models(args, model, optimizer, scheduler)
+
+        if args.make_csv:
+            with open(args.log_dir / "loss_f.csv","a+") as fp:
+                writer = csv.writer(fp)
+                writer.writerow(train_losses)
+                writer.writerow(dev_f)
     
+    if not args.no_test:
+        test_loader = DataLoader(dataset[TEST], batch_size=args.batch_size, shuffle=False, pin_memory=True)
+        model = MT5ForConditionalGeneration.from_pretrained(args.ckpt_dir / "model").to(device=args.device)
+        # TEST
+        _, preds, ids = dev_epoch(args, model, test_loader, tokenizer, args.device)
+        # Output the prediction
+        with open(args.output_file_path, "w", encoding="utf8") as fp:
+            for pred ,i,in zip(preds, ids):
+                json.dump({"title":pred, "id":i}, fp, ensure_ascii = False)
+                fp.write("\n")
             
 def parse_args() -> Namespace:
     parser = ArgumentParser()
@@ -160,6 +198,12 @@ def parse_args() -> Namespace:
     parser.add_argument("--fp16_training", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--make_csv", action="store_true", help="Print loss and rouge score.")
+
+    # Mode
+    parser.add_argument("--no_train", action="store_true")
+    parser.add_argument("--no_test", action="store_true")
+    parser.add_argument("--resume_train", action="store_true")
+    
 
     parser.add_argument(
         "--ckpt_dir",
