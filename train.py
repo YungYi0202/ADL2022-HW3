@@ -16,6 +16,9 @@ from dataset import NewsSummaryDataset
 from tw_rouge import get_rouge
 import csv
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
 def train_epoch(epoch, args, model, train_loader, optimizer, scheduler, device):
     model.train()
     
@@ -156,7 +159,6 @@ def parse_args() -> Namespace:
     # Change "fp16_training" to True to support automatic mixed precision training (fp16)
     parser.add_argument("--fp16_training", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--make_csv", action="store_true", help="Print loss and rouge score.")
 
     parser.add_argument(
@@ -202,6 +204,8 @@ def parse_args() -> Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    args.device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"device: {args.device}")
 
     args.ckpt_dir.mkdir(parents=True, exist_ok=True)
     args.ckpt_dir = args.ckpt_dir / str(args.experiment_number)

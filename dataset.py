@@ -1,5 +1,6 @@
+from torch.utils.data import Dataset
 class NewsSummaryDataset(Dataset):
-    def __init__(self, data, tokenizer: T5Tokenizer, title_max_len: int = 64, maintext_max_len:int = 2048):
+    def __init__(self, data, tokenizer, title_max_len: int = 64, maintext_max_len:int = 2048):
         self.data = data
         self.tokenizer = tokenizer
         self.title_max_len = title_max_len
