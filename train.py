@@ -87,8 +87,9 @@ def train_epoch(epoch, args, model, train_loader, optimizer, scheduler, device):
         if ((step + 1) % args.accu_grad == 0) or (step + 1 == len(train_loader)):
             optimizer.step()
             optimizer.zero_grad()
-            for i in range(args.accu_grad):
-                scheduler.step()
+            if not args.no_scheduler:
+                for i in range(args.accu_grad):
+                    scheduler.step()
 
         # Print training loss and accuracy over past logging step
         if (step + 1) % args.logging_step == 0:
@@ -112,7 +113,7 @@ def dev_epoch(args, model, dev_loader, tokenizer, device):
                 top_k=args.top_k,
                 top_p=args.top_p,
                 repetition_penalty=2.5,
-                early_stopping=True
+                early_stopping=args.early_stopping
             )
             decoded_result = tokenizer.batch_decode( generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
             pred = list(map(lambda x:x.strip(),decoded_result))
@@ -181,13 +182,17 @@ def main(args):
         # Optimizer
         optimizer = AdamW(model.parameters(), lr=args.lr, correct_bias=False)
         # Scheduler
-        total_steps = len(train_loader) * args.num_epoch
-        warmup_steps = int(total_steps * args.warmup_ratio)
-        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps= warmup_steps, num_training_steps=total_steps) 
+        if args.no_scheduler:
+            scheduler = None
+        else: 
+            total_steps = len(train_loader) * args.num_epoch
+            warmup_steps = int(total_steps * args.warmup_ratio)
+            scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps= warmup_steps, num_training_steps=total_steps) 
         
         if args.resume_train:
             optimizer.load_state_dict(args.ckpt_dir / "optimizer.pt")
-            scheduler.load_state_dict(args.ckpt_dir / "scheduler.pt")
+            if not args.no_scheduler:
+                scheduler.load_state_dict(args.ckpt_dir / "scheduler.pt")
 
         train_losses, dev_f = [], []
         best_f = 0.0
@@ -246,12 +251,15 @@ def parse_args() -> Namespace:
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--num_epoch", type=int, default=10)
+    parser.add_argument("--no_scheduler", action="store_true")
+
 
     # decoder
     parser.add_argument("--num_beams", type=int, default=1)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_k", type=int, default=50)
     parser.add_argument("--top_p", type=float, default=1.0)
+    parser.add_argument("--early_stopping", action="store_true")
 
     # Change "fp16_training" to True to support automatic mixed precision training (fp16)
     parser.add_argument("--fp16_training", action="store_true")
