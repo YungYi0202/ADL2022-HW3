@@ -1,11 +1,12 @@
 from torch.utils.data import Dataset
 from utils import *
 class NewsSummaryDataset(Dataset):
-    def __init__(self, data, tokenizer, title_max_len: int = 64, maintext_max_len:int = 2048):
+    def __init__(self, data, tokenizer, title_max_len: int = 64, maintext_max_len:int = 2048, add_prefix: bool = False):
         self.data = data
         self.tokenizer = tokenizer
         self.title_max_len = title_max_len
         self.maintext_max_len = maintext_max_len
+        self.add_prefix = add_prefix
 
     def __len__(self):
         return len(self.data)
@@ -42,8 +43,11 @@ class NewsSummaryDataset(Dataset):
             ret["labels_attention_mask"] = title_encoding["attention_mask"].flatten()
 
         if MAINTEXT in sample:
+            maintext = sample[MAINTEXT]
+            if add_prefix:
+                maintext = "summarize: " + maintext
             maintext_encoding = self.tokenizer(
-                self.clean(sample[MAINTEXT]),
+                self.clean(maintext),
                 max_length=self.title_max_len,
                 padding="max_length",
                 truncation=True,

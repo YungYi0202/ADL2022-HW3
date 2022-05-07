@@ -17,7 +17,7 @@ from tw_rouge import get_rouge
 import csv
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
 def get_splits_n_filenames(args):
@@ -165,7 +165,7 @@ def main(args):
     
     # Dataset
     dataset = {
-        split: NewsSummaryDataset(raw_data[split], tokenizer, args.title_max_len, args.maintext_max_len) 
+        split: NewsSummaryDataset(raw_data[split], tokenizer, args.title_max_len, args.maintext_max_len, args.add_prefix) 
         for split in SPLITS
         }
 
@@ -191,13 +191,14 @@ def main(args):
             scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps= warmup_steps, num_training_steps=total_steps) 
         
         if args.resume_train:
+            print(f"Load optimizer and scheduler from {args.ckpt_dir}")
             optimizer.load_state_dict(torch.load(args.ckpt_dir / "optimizer.pt"))
             if not args.no_scheduler:
                 scheduler.load_state_dict(torch.load(args.ckpt_dir / "scheduler.pt"))
 
         train_losses, dev_f = [], []
-        best_f = 0.0
-        for epoch in range(args.num_epoch):
+        best_f = args.resume_best_f
+        for epoch in range(args.resume_epoch, args.num_epoch):
             # TRAIN
             new_train_losses = train_epoch(epoch, args, model, train_loader, optimizer, scheduler, args.device)
             train_losses.extend(new_train_losses)
@@ -271,7 +272,10 @@ def parse_args() -> Namespace:
     parser.add_argument("--no_train", action="store_true")
     parser.add_argument("--no_test", action="store_true")
     parser.add_argument("--resume_train", action="store_true")
+    parser.add_argument("--resume_best_f", type=float, default=0.0)
+    parser.add_argument("--resume_epoch", type=int, default=0)
     parser.add_argument("--load_model_ckpt", type=str, default=None)
+    parser.add_argument("--add_prefix", action="store_true")
 
     # RL
     parser.add_argument("--gamma", type=float, default=0.999)
