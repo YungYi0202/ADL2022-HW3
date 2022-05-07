@@ -146,7 +146,8 @@ def save_models(args, model, optimizer, scheduler):
     print("Saving Model ...")
     model.save_pretrained(args.ckpt_dir / "model")
     torch.save(optimizer.state_dict(), args.ckpt_dir / "optimizer.pt")
-    torch.save(scheduler.state_dict(), args.ckpt_dir / "scheduler.pt") 
+    if not args.no_scheduler:
+        torch.save(scheduler.state_dict(), args.ckpt_dir / "scheduler.pt") 
 
 def main(args):
     set_seed(args.seed)
@@ -190,9 +191,9 @@ def main(args):
             scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps= warmup_steps, num_training_steps=total_steps) 
         
         if args.resume_train:
-            optimizer.load_state_dict(args.ckpt_dir / "optimizer.pt")
+            optimizer.load_state_dict(torch.load(args.ckpt_dir / "optimizer.pt"))
             if not args.no_scheduler:
-                scheduler.load_state_dict(args.ckpt_dir / "scheduler.pt")
+                scheduler.load_state_dict(torch.load(args.ckpt_dir / "scheduler.pt"))
 
         train_losses, dev_f = [], []
         best_f = 0.0
