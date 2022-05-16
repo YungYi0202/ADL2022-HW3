@@ -62,10 +62,6 @@ def dev_epoch(args, model, dev_loader, tokenizer, device):
 
 def main(args):
     set_seed(args.seed)
-    if args.enable_rl:
-        print("Enable reinforcement learning")
-        from torch.distributions import Categorical
-        from torch.autograd import Variable
     
     # print(args)
 
@@ -98,6 +94,7 @@ def parse_args() -> Namespace:
     parser = ArgumentParser()
     parser.add_argument("--maintext_max_len", type=int, default=2048)
     parser.add_argument("--title_max_len", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=1)
     
     parser.add_argument("--tokenizer_path", type=str, default="google/mt5-small")
 

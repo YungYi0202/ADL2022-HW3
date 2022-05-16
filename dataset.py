@@ -14,8 +14,6 @@ class NewsSummaryDataset(Dataset):
     def clean(self, text):
         text = text.replace("\n", "")
         text = text.replace("\r", "")
-        #text = text.replace(" ", "")
-        #text = text.replace("`", "")
         return text
 
     def __getitem__(self, index: int):
@@ -40,15 +38,14 @@ class NewsSummaryDataset(Dataset):
         
             ret["title"] = title
             ret["labels"] = labels.flatten()
-            ret["labels_attention_mask"] = title_encoding["attention_mask"].flatten()
 
         if MAINTEXT in sample:
             maintext = sample[MAINTEXT]
-            if add_prefix:
+            if self.add_prefix:
                 maintext = "summarize: " + maintext
             maintext_encoding = self.tokenizer(
                 self.clean(maintext),
-                max_length=self.title_max_len,
+                max_length=self.maintext_max_len,
                 padding="max_length",
                 truncation=True,
                 return_attention_mask=True,

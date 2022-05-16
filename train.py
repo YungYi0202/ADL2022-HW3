@@ -7,7 +7,7 @@ import torch
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 
-from transformers import AdamW, MT5ForConditionalGeneration, T5Tokenizer, set_seed, get_linear_schedule_with_warmup
+from transformers import AdamW, MT5ForConditionalGeneration, T5TokenizerFast, set_seed, get_linear_schedule_with_warmup
 from tqdm.auto import tqdm
 
 from utils import *
@@ -16,8 +16,11 @@ from dataset import NewsSummaryDataset
 from tw_rouge import get_rouge
 import csv
 
+from torch.distributions import Categorical
+from torch.autograd import Variable
+
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
 def get_splits_n_filenames(args):
@@ -38,8 +41,8 @@ def policy_grad(args, loss, logits, tokenizer, titles):
     all_rewards = []
     for logit, title in zip (logits, titles):
         actions = []
-        for idx, logit in enumerate(logit):
-            d = Categorical(logits=logit)
+        for idx, single_logit in enumerate(logit):
+            d = Categorical(logits=single_logit)
             act = d.sample()
             actions.append(act)
             if policys == None:
@@ -57,14 +60,14 @@ def policy_grad(args, loss, logits, tokenizer, titles):
             rewards.insert(0, R - 0.2)
             R *= args.gamma
         all_rewards.extend(rewards)
-        print(f"Actions: {actions}, Original Loss: {loss.item()}")
+        # print(f"Actions: {actions}, Original Loss: {loss.item()}")
         
     all_rewards = torch.tensor(all_rewards).to(args.device)
     # loss = total reward * (-1)
     loss = torch.sum(torch.mul(policys, Variable(all_rewards)).mul(-1),-1)
     return loss
 
-def train_epoch(epoch, args, model, train_loader, optimizer, scheduler, device):
+def train_epoch(epoch, args, model, train_loader, tokenizer, optimizer, scheduler, device):
     model.train()
     
     train_loss = 0.0
@@ -74,7 +77,7 @@ def train_epoch(epoch, args, model, train_loader, optimizer, scheduler, device):
         output = model(batch["input_ids"].to(device), 
                     attention_mask=batch["attention_mask"].to(device), 
                     labels=batch["labels"].to(device), 
-                    decoder_attention_mask=batch["labels_attention_mask"].to(device))
+                    )
 
         loss = output.loss
         if args.enable_rl:
@@ -93,8 +96,8 @@ def train_epoch(epoch, args, model, train_loader, optimizer, scheduler, device):
 
         # Print training loss and accuracy over past logging step
         if (step + 1) % args.logging_step == 0:
-            print(f"Epoch {epoch + 1} | Step {step + 1} | loss = {train_loss / args.logging_step:.3f}")
-            train_losses.append(train_loss / args.logging_step)
+            print(f"Epoch {epoch + 1} | Step {step + 1} | loss = {train_loss * args.accu_grad / args.logging_step:.3f}")
+            train_losses.append(train_loss * args.accu_grad / args.logging_step)
             train_loss = 0.0
     
     return train_losses
@@ -108,12 +111,14 @@ def dev_epoch(args, model, dev_loader, tokenizer, device):
                 batch["input_ids"].to(device),
                 attention_mask=batch["attention_mask"].to(device), 
                 max_length=args.title_max_len,
+                min_length=10,
                 num_beams=args.num_beams,
                 temperature=args.temperature,
                 top_k=args.top_k,
                 top_p=args.top_p,
                 repetition_penalty=2.5,
-                early_stopping=args.early_stopping
+                early_stopping=args.early_stopping,
+                do_sample=args.do_sample
             )
             decoded_result = tokenizer.batch_decode( generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
             pred = list(map(lambda x:x.strip(),decoded_result))
@@ -153,15 +158,16 @@ def main(args):
     set_seed(args.seed)
     if args.enable_rl:
         print("Enable reinforcement learning")
-        from torch.distributions import Categorical
-        from torch.autograd import Variable
+    
+    # print(args)
 
     # Data
     SPLITS, filenames = get_splits_n_filenames(args)
+    KEYS[TEST].append(TITLE)
     raw_data = {split: read_data(filenames[split], KEYS[split]) for split in SPLITS}
     
     # Tokenizer
-    tokenizer = T5Tokenizer.from_pretrained(args.model_path)
+    tokenizer = T5TokenizerFast.from_pretrained(args.model_path)
     
     # Dataset
     dataset = {
@@ -178,10 +184,11 @@ def main(args):
         elif args.load_model_ckpt is not None:
             args.model_path = args.load_model_ckpt
         # Model
+        print(f"Load model from {args.model_path}")
         model = MT5ForConditionalGeneration.from_pretrained(args.model_path).to(device=args.device)
 
         # Optimizer
-        optimizer = AdamW(model.parameters(), lr=args.lr, correct_bias=False)
+        optimizer = AdamW(model.parameters(), lr=args.lr, correct_bias=False, weight_decay=args.weight_decay)
         # Scheduler
         if args.no_scheduler:
             scheduler = None
@@ -200,7 +207,7 @@ def main(args):
         best_f = args.resume_best_f
         for epoch in range(args.resume_epoch, args.num_epoch):
             # TRAIN
-            new_train_losses = train_epoch(epoch, args, model, train_loader, optimizer, scheduler, args.device)
+            new_train_losses = train_epoch(epoch, args, model, train_loader, tokenizer, optimizer, scheduler, args.device)
             train_losses.extend(new_train_losses)
             # DEV
             titles, preds, _ = dev_epoch(args, model, dev_loader, tokenizer, args.device)
@@ -223,18 +230,26 @@ def main(args):
                 writer.writerow(dev_f)
     
     if not args.no_test:
-        print("Start Testing...")
+        print(f"Start Testing... Load Model from {args.ckpt_dir / 'model'}")
         test_loader = DataLoader(dataset[TEST], batch_size=args.batch_size, shuffle=False, pin_memory=True)
         model = MT5ForConditionalGeneration.from_pretrained(args.ckpt_dir / "model").to(device=args.device)
         # TEST
-        _, preds, ids = dev_epoch(args, model, test_loader, tokenizer, args.device)
+        titles, preds, ids = dev_epoch(args, model, test_loader, tokenizer, args.device)
+        
+        # Output the score
+        eval_res = get_rouge(preds, titles)
+        print(eval_res)
+        with open(args.log_dir / f"test{args.experiment_number}.json", "w") as fp:
+            json.dump(eval_res, fp, indent = 4)
+
         # Output the prediction
-        if args.output_file_path is None:
-            args.output_file_path = args.log_dir / f"submission{args.experiment_number}.jsonl"
-        with open(args.output_file_path, "w", encoding="utf8") as fp:
-            for pred ,i,in zip(preds, ids):
-                json.dump({"title":pred, "id":i}, fp, ensure_ascii = False)
-                fp.write("\n")
+        if not args.no_output:
+            if args.output_file_path is None:
+                args.output_file_path = args.log_dir / f"submission{args.experiment_number}.jsonl"
+            with open(args.output_file_path, "w", encoding="utf8") as fp:
+                for pred ,i,in zip(preds, ids):
+                    json.dump({"title":pred, "id":i}, fp, ensure_ascii = False)
+                    fp.write("\n")
             
 def parse_args() -> Namespace:
     parser = ArgumentParser()
@@ -245,6 +260,7 @@ def parse_args() -> Namespace:
     parser.add_argument("--experiment_number", type=int, default=0)
     # optimizer
     parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--weight_decay", type=float, default=0.0)
 
     # training
     parser.add_argument("--batch_size", type=int, default=4)
@@ -254,14 +270,14 @@ def parse_args() -> Namespace:
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--num_epoch", type=int, default=10)
     parser.add_argument("--no_scheduler", action="store_true")
-
-
+    
     # decoder
     parser.add_argument("--num_beams", type=int, default=1)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_k", type=int, default=50)
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--early_stopping", action="store_true")
+    parser.add_argument("--do_sample", action="store_true")
 
     # Change "fp16_training" to True to support automatic mixed precision training (fp16)
     parser.add_argument("--fp16_training", action="store_true")
@@ -271,6 +287,7 @@ def parse_args() -> Namespace:
     # Mode
     parser.add_argument("--no_train", action="store_true")
     parser.add_argument("--no_test", action="store_true")
+    parser.add_argument("--no_output", action="store_true")
     parser.add_argument("--resume_train", action="store_true")
     parser.add_argument("--resume_best_f", type=float, default=0.0)
     parser.add_argument("--resume_epoch", type=int, default=0)
