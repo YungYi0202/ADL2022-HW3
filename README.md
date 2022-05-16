@@ -8,6 +8,8 @@ bash ./run.sh /path/to/input.jsonl /path/to/output.jsonl
 ```
 ## How to train my model
 
+Please first install tw_rouge. [Link](https://github.com/moooooser999/ADL22-HW3)
+
 ### Parameters
 - CKPT_DIR: path/to/dir/of/ckpt
 - LOG_DIR: path/to/dir/of/log
